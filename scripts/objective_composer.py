@@ -18,6 +18,7 @@ from flask.json import jsonify
 from urllib.parse import urlparse
 import tempfile
 import shelve
+import json
 import os
 
 rospy.init_node('objective_composer')
@@ -29,32 +30,31 @@ app = Flask(__name__)
 api = Api(app)
 
 per_dir = rospy.get_param('~per_dir', os.path.dirname(os.path.realpath(__file__)))
-with shelve.open(per_dir + '/storage.shelve') as shelve:
-    if not 'composed' in shelve:
-        shelve['composed'] = 0
+with shelve.open(per_dir + '/storage.shelve') as db:
+    if not 'composed' in db:
+        db['composed'] = 0
 
 class Stats(Resource):
     def get(self):
-        with shelve.open(per_dir + '/storage.shelve') as shelve:
-            return jsonify({'objectivesComposed': shelve['composed']})
+        with shelve.open(per_dir + '/storage.shelve') as db:
+            return jsonify({'objectivesComposed': db['composed']})
 
 tmp_dir = rospy.get_param('~tmp_dir', '/tmp/agent')
 class ComposeObjective(Resource):
     def get(self):
-        gps = request.get_json()['GPS']
-        params = request.get_json()['Params']
+        gps = json.loads(request.get_json())['GPS']
+        params = json.loads(request.get_json())['Params']
         bag_name = tmp_dir + '/objective' + next(tempfile._get_candidate_names()) + '.bag'
         with rosbag.Bag(bag_name, 'w') as bag:
             bag.write('/agent/objective/position', String(data=gps))
             bag.write('/agent/objective/parameters', String(data=params))
-        with shelve.open(per_dir + '/storage.shelve') as shelve:
-            shelve['composed'] += 1
+        with shelve.open(per_dir + '/storage.shelve') as db:
+            db['composed'] += 1
         return jsonify({'objective': ipfs.add(bag_name)['Hash']})
 
 api.add_resource(Stats, '/stats')
 api.add_resource(ComposeObjective, '/get_objective')
 
 server_address = urlparse(rospy.get_param('~server_address')).netloc.split(':')
-app.run(host=server_address[0], port=server_address[1])
-
+app.run(host=server_address[0], port=int(server_address[1]))
 rospy.spin()
